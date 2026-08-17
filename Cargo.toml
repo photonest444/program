@@ -25,10 +25,10 @@ winapi = { version = "0.3", features = [
     "errhandlingapi",
     "handleapi",
     "winnt",
+    "winerror",
     "shellapi",
     "shlobj",
     "knownfolders",
-    "securitybaseapi",
-    "winerror"
+    "securitybaseapi"
 ] }
 winreg = "0.50"
