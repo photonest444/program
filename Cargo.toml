@@ -19,22 +19,11 @@ path = "src/screen_holder.rs"
 winapi = { version = "0.3", features = [
     "winuser",
     "winbase",
-    "winreg",
     "fileapi",
     "processthreadsapi",
     "synchapi",
-    "securitybaseapi",
-    "shellapi",
-    "shlobj",
     "errhandlingapi",
     "handleapi",
-    "winnt",
-    "lmaccess",
-    "lmerr",
-    "lmcons",
-    "wtypes",
-    "knownfolders"
+    "winnt"
 ] }
 winreg = "0.50"
-rand = "0.8"
-ntapi = "0.4"
