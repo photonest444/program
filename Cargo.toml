@@ -24,6 +24,11 @@ winapi = { version = "0.3", features = [
     "synchapi",
     "errhandlingapi",
     "handleapi",
-    "winnt"
+    "winnt",
+    "shellapi",
+    "shlobj",
+    "knownfolders",
+    "securitybaseapi",
+    "winerror"
 ] }
 winreg = "0.50"
