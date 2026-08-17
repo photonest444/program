@@ -5,7 +5,7 @@ use std::time::Duration;
 use std::os::windows::process::CommandExt;
 use winapi::um::synchapi::CreateMutexW;
 use winapi::um::errhandlingapi::GetLastError;
-use winapi::um::winbase::ERROR_ALREADY_EXISTS;
+use winapi::shared::winerror::ERROR_ALREADY_EXISTS;
 use std::ptr::null_mut;
 
 const CREATE_NO_WINDOW: u32 = 0x08000000;
