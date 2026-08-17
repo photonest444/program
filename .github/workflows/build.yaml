@@ -1,15 +1,9 @@
-name: Build Windows Lockdown Tool
+name: Build Static Windows Tool
 
 on:
   push:
-    branches: [ main, master ]
-  pull_request:
-    branches: [ main, master ]
+    branches: [ main ]
   workflow_dispatch:
-
-env:
-  CARGO_TERM_COLOR: always
-  RUSTFLAGS: "-C target-feature=+crt-static"
 
 jobs:
   build:
@@ -24,111 +18,15 @@ jobs:
         toolchain: stable
         target: x86_64-pc-windows-msvc
         override: true
-        components: rustfmt, clippy
     
-    - name: Install Windows SDK tools (dumpbin)
+    - name: Build with static CRT
       run: |
-        choco install windows-sdk-10.1 -y || echo "choco not available, skipping"
-    
-    - name: Create dummy video
-      run: New-Item -Path "video.mp4" -ItemType File -Force
-    
-    - name: Build with static linking
-      run: |
-        Write-Host "Building with RUSTFLAGS: $env:RUSTFLAGS"
+        # Статическая линковка MSVCRT
+        set RUSTFLAGS=-C target-feature=+crt-static -C relocation-model=static
         cargo build --release --target x86_64-pc-windows-msvc
-        Write-Host "Build completed!"
     
-    - name: Check for dependencies
-      run: |
-        Write-Host "`n=== Checking dependencies of built executables ==="
-        Get-ChildItem target\x86_64-pc-windows-msvc\release\*.exe | ForEach-Object {
-            Write-Host "`nChecking: $($_.Name)"
-            # Используем depends или objdump, если доступно
-            & "C:\Program Files (x86)\Windows Kits\10\bin\10.0.22621.0\x64\dumpbin.exe" /dependents $_.FullName 2>$null
-        }
-    
-    - name: Copy required DLLs
-      run: |
-        Write-Host "`n=== Copying required system DLLs ==="
-        New-Item -ItemType Directory -Force -Path deploy
-        
-        # Копируем EXE файлы
-        Copy-Item target\x86_64-pc-windows-msvc\release\*.exe deploy\
-        
-        # Копируем необходимые системные DLL
-        $dlls = @(
-            "C:\Windows\System32\vcruntime140.dll",
-            "C:\Windows\System32\vcruntime140_1.dll",
-            "C:\Windows\System32\msvcp140.dll",
-            "C:\Windows\System32\msvcp140_1.dll",
-            "C:\Windows\System32\msvcp140_2.dll",
-            "C:\Windows\System32\concrt140.dll",
-            "C:\Windows\System32\api-ms-win-crt-runtime-l1-1-0.dll",
-            "C:\Windows\System32\api-ms-win-crt-stdio-l1-1-0.dll",
-            "C:\Windows\System32\api-ms-win-crt-heap-l1-1-0.dll",
-            "C:\Windows\System32\api-ms-win-crt-locale-l1-1-0.dll",
-            "C:\Windows\System32\api-ms-win-crt-math-l1-1-0.dll",
-            "C:\Windows\System32\api-ms-win-crt-string-l1-1-0.dll",
-            "C:\Windows\System32\api-ms-win-crt-time-l1-1-0.dll",
-            "C:\Windows\System32\api-ms-win-crt-filesystem-l1-1-0.dll",
-            "C:\Windows\System32\api-ms-win-crt-convert-l1-1-0.dll",
-            "C:\Windows\System32\api-ms-win-crt-utility-l1-1-0.dll"
-        )
-        
-        foreach ($dll in $dlls) {
-            if (Test-Path $dll) {
-                Copy-Item $dll deploy\
-                Write-Host "✓ Copied: $(Split-Path $dll -Leaf)"
-            } else {
-                Write-Host "✗ Not found: $dll"
-            }
-        }
-        
-        # Копируем video.mp4
-        if (Test-Path "video.mp4") {
-            Copy-Item video.mp4 deploy\
-        }
-        
-        # Создаём run.bat
-        @"
-@echo off
-title Zero Entry Installer
-color 4F
-echo ========================================
-echo  WINDOWS LOCKDOWN TOOL - INSTALLER
-echo ========================================
-echo.
-echo ВНИМАНИЕ! Данный инструмент предназначен
-echo для образовательных целей.
-echo.
-echo Установка требует прав администратора.
-echo.
-pause
-start /wait deployer.exe
-echo.
-echo Установка завершена. Система будет перезагружена.
-pause
-"@ | Out-File -FilePath deploy\run.bat -Encoding ASCII
-        
-        Write-Host "`n=== Deploy package contents ==="
-        Get-ChildItem deploy\
-    
-    - name: Create ZIP archive with DLLs
-      run: |
-        Compress-Archive -Path deploy\* -DestinationPath lockdown_tool_with_dlls.zip -Force -CompressionLevel Optimal
-        Write-Host "Archive created: lockdown_tool_with_dlls.zip ($((Get-Item lockdown_tool_with_dlls.zip).Length / 1KB) KB)"
-    
-    - name: Upload archive with DLLs
+    - name: Upload
       uses: actions/upload-artifact@v4
       with:
-        name: lockdown-tool-with-dlls
-        path: lockdown_tool_with_dlls.zip
-        retention-days: 30
-    
-    - name: Upload deployment folder
-      uses: actions/upload-artifact@v4
-      with:
-        name: deploy-folder
-        path: deploy/
-        retention-days: 30
+        name: static-binaries
+        path: target/x86_64-pc-windows-msvc/release/*.exe
