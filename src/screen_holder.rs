@@ -6,8 +6,9 @@ use std::time::Duration;
 use winapi::um::winuser::{
     FindWindowW, SetWindowLongW, GWL_EXSTYLE, WS_EX_TOPMOST,
     WS_EX_NOACTIVATE, WS_EX_TOOLWINDOW, ShowWindow, SW_SHOWMAXIMIZED,
-    SetForegroundWindow, BringWindowToTop, ShowCursor, FALSE, SetCursorPos
+    SetForegroundWindow, BringWindowToTop, ShowCursor, SetCursorPos
 };
+use winapi::um::winnt::FALSE;
 
 fn main() {
     let video = std::env::var("SYSTEMROOT").unwrap() + "\\System32\\video.mp4";
